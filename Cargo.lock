@@ -702,9 +702,12 @@ checksum = "1944426bf7d03f1d14f708785e4b33efd750b36d48a157b836b3efc15ede8e1d"
 name = "galactic-unicorn"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-rp",
  "embassy-time",
+ "fixed",
  "pico-graphics",
+ "pico-synth",
  "pio",
  "static_cell",
 ]
@@ -1065,6 +1068,10 @@ dependencies = [
  "embedded-graphics",
  "embedded-graphics-core",
 ]
+
+[[package]]
+name = "pico-synth"
+version = "0.1.0"
 
 [[package]]
 name = "pin-project-lite"

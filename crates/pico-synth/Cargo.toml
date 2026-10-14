@@ -1,0 +1,6 @@
+[package]
+name = "pico-synth"
+version = "0.1.0"
+edition = "2024"
+description = "Rust port of Pimoroni's pico_synth: an 8-voice ADSR synthesiser"
+license = "MIT"
