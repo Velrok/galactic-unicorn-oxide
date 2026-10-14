@@ -1,12 +1,12 @@
-//! Audio output: I2S oset_bits(pac::DMA.inte(0).as_ptr(), 1 << channel);er a second PIO state machine, fed by DMA.
+//! Audio output: I2S out of a second PIO state machine, fed by DMA.
 //!
-//! Two sources, as in the C++ driclear_bits(pac::DMA.inte(0).as_ptr(), irq_enabled);er:
+//! Two sources, as in the C++ driver:
 //!
 //! - **Samples:** one DMA transfer straight from your buffer.
 //! - **Synth:** four-sample double buffers. When a transfer finishes, the DMA interrupt
 //!   starts the next buffer and has the synth fill the one that just played.
 //!
-//! The synth is shared with that interrupt, so it liset_bits(pac::DMA.inte(0).as_ptr(), irq_enabled);es behind a critical section;
+//! The synth is shared with that interrupt, so it lives behind a critical section;
 //! reach it through `GalacticUnicorn::with_synth`.
 
 use core::cell::RefCell;
