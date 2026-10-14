@@ -1,0 +1,4 @@
+[submodule "ref-impl"]
+	path = ref-impl
+	url = https://github.com/pimoroni/pimoroni-pico
+	shallow = true
