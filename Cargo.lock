@@ -691,15 +691,19 @@ dependencies = [
 name = "galactic-unicorn-oxide"
 version = "0.1.0"
 dependencies = [
+ "cortex-m",
  "cortex-m-rt",
  "embassy-executor",
+ "embassy-futures",
  "embassy-rp",
  "embassy-time",
+ "embassy-usb",
  "embassy-usb-logger",
  "galactic-unicorn",
  "log",
  "panic-halt",
  "pico-graphics",
+ "static_cell",
 ]
 
 [[package]]

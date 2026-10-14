@@ -12,20 +12,22 @@ use log::info;
 use panic_halt as _;
 use pico_graphics::{PenRgb888, Point};
 
+mod usb;
+
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => InterruptHandler<USB>;
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
 #[embassy_executor::task]
-async fn logger_task(driver: Driver<'static, USB>) {
-    embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
+async fn usb_task(driver: Driver<'static, USB>) {
+    usb::run(driver).await
 }
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
-    spawner.spawn(logger_task(Driver::new(p.USB, Irqs)).unwrap());
+    spawner.spawn(usb_task(Driver::new(p.USB, Irqs)).unwrap());
 
     let pio = Pio::new(p.PIO0, Irqs);
     let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio));
