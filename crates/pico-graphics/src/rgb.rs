@@ -1,12 +1,19 @@
 /// 8-bit-per-channel colour (`pimoroni::RGB`).
+///
+/// The C++ type stores `int16_t` channels so arithmetic can go out of range; this one
+/// is `u8`, matching what the display takes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rgb {
+    /// Red, `0..=255`.
     pub r: u8,
+    /// Green, `0..=255`.
     pub g: u8,
+    /// Blue, `0..=255`.
     pub b: u8,
 }
 
 impl Rgb {
+    /// Create a colour from its channels.
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }
@@ -21,7 +28,12 @@ impl Rgb {
         (self.r as u32) << 16 | (self.g as u32) << 8 | self.b as u32
     }
 
-    /// `h`, `s`, `v` in `0.0..=1.0`.
+    /// Colour from hue, saturation and value, each in `0.0..=1.0`.
+    ///
+    /// ```
+    /// use pico_graphics::Rgb;
+    /// assert_eq!(Rgb::from_hsv(0.0, 1.0, 1.0), Rgb::new(255, 0, 0)); // red
+    /// ```
     pub fn from_hsv(h: f32, s: f32, v: f32) -> Self {
         let h6 = h * 6.0;
         let i = h6 as i32; // truncation == floor for h >= 0

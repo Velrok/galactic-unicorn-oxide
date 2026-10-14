@@ -13,11 +13,14 @@ use crate::{Point, Rect, Rgb};
 pub struct PenRgb888<const W: usize, const H: usize> {
     frame_buffer: [[u32; W]; H],
     color: u32,
+    /// The whole surface: `0, 0, W, H`.
     pub bounds: Rect,
+    /// Drawing is limited to this rectangle; defaults to `bounds`.
     pub clip: Rect,
 }
 
 impl<const W: usize, const H: usize> PenRgb888<W, H> {
+    /// A black framebuffer with the pen set to black (`0`) and no clip.
     pub const fn new() -> Self {
         let bounds = Rect::new(0, 0, W as i32, H as i32);
         Self {
@@ -33,26 +36,34 @@ impl<const W: usize, const H: usize> PenRgb888<W, H> {
         &self.frame_buffer
     }
 
+    /// Set the pen to a packed `0x00RRGGBB` colour (`set_pen(uint c)`).
     pub fn set_pen(&mut self, c: u32) {
         self.color = c;
     }
 
+    /// Set the pen from channels (`set_pen(r, g, b)`).
     pub fn set_pen_rgb(&mut self, r: u8, g: u8, b: u8) {
         self.color = Rgb::new(r, g, b).to_rgb888();
     }
 
+    /// Pack a colour for [`set_pen`](Self::set_pen). With RGB888 there is no palette,
+    /// so this is just the packed value (`create_pen`).
     pub fn create_pen(&self, r: u8, g: u8, b: u8) -> u32 {
         Rgb::new(r, g, b).to_rgb888()
     }
 
+    /// Like [`create_pen`](Self::create_pen) from hue, saturation and value in
+    /// `0.0..=1.0` (`create_pen_hsv`).
     pub fn create_pen_hsv(&self, h: f32, s: f32, v: f32) -> u32 {
         Rgb::from_hsv(h, s, v).to_rgb888()
     }
 
+    /// Limit drawing to `r`, itself limited to `bounds` (`set_clip`).
     pub fn set_clip(&mut self, r: Rect) {
         self.clip = self.bounds.intersection(r);
     }
 
+    /// Reset the clip to `bounds` (`remove_clip`).
     pub fn remove_clip(&mut self) {
         self.clip = self.bounds;
     }

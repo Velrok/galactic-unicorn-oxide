@@ -1,5 +1,9 @@
 //! The buffer the PIO consumes, via a looping DMA transfer.
 //!
+//! The PIO cannot access memory at random and has almost no branching, so the data
+//! is "interleaved": delivered in exactly the order the PIO program needs it, with
+//! the row, pixel count and timing values inserted between pixels.
+//!
 //! ```text
 //! for each row:
 //!   for each bcd frame:
@@ -10,21 +14,37 @@
 //!   56..=59: bcd tick count, little endian
 //! ```
 
+/// Display width in pixels.
 pub const WIDTH: usize = 53;
+/// Display height in pixels.
 pub const HEIGHT: usize = 11;
 
+/// Rows scanned one at a time.
 pub const ROW_COUNT: usize = HEIGHT;
+/// Binary-coded-modulation frames per row: one per bit of the 14-bit gamma output.
 pub const BCD_FRAME_COUNT: usize = 14;
+/// Bytes in one BCD frame (header, 53 pixels, padding, tick count).
 pub const BCD_FRAME_BYTES: usize = 60;
+/// Bytes in one row: all of its BCD frames.
 pub const ROW_BYTES: usize = BCD_FRAME_COUNT * BCD_FRAME_BYTES;
+/// Total bitstream size: 11 rows x 14 frames x 60 bytes = 9,240.
 pub const BITSTREAM_LENGTH: usize = ROW_COUNT * ROW_BYTES;
 
 /// 32-bit aligned so DMA can move it a word at a time.
 #[repr(C, align(4))]
+/// The interleaved framebuffer. Build with [`Bitstream::new`], write with
+/// [`Bitstream::set_pixel`].
 pub struct Bitstream(pub [u8; BITSTREAM_LENGTH]);
 
 impl Bitstream {
     /// All pixels off, with row selects and BCD timings filled in.
+    ///
+    /// ```
+    /// use galactic_unicorn::bitstream::{Bitstream, BITSTREAM_LENGTH};
+    /// let mut bs = Bitstream::new();
+    /// assert_eq!(bs.0.len(), BITSTREAM_LENGTH);
+    /// bs.set_pixel(0, 0, 255, 255, 255, 256); // white, full brightness
+    /// ```
     pub const fn new() -> Self {
         let mut buf = [0u8; BITSTREAM_LENGTH];
         let mut row = 0;
@@ -80,7 +100,8 @@ impl Default for Bitstream {
     }
 }
 
-/// `(n / 255) ^ 2.2 * 16383 + 0.5`
+/// Maps an 8-bit channel value to the 14 bits shown over the BCD frames:
+/// `(n / 255) ^ 2.2 * 16383 + 0.5`.
 pub const GAMMA_14BIT: [u16; 256] = [
           0, 0, 0, 1, 2, 3, 4, 6, 8, 10, 13, 16, 20, 23, 28, 32,
           37, 42, 48, 54, 61, 67, 75, 82, 90, 99, 108, 117, 127, 137, 148, 159,

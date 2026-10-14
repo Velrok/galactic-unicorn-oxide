@@ -1,16 +1,27 @@
 /// A point in pixel coordinates (`pimoroni::Point`).
+///
+/// `x` grows rightwards and `y` downwards from the top-left corner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Point {
+    /// Horizontal position.
     pub x: i32,
+    /// Vertical position.
     pub y: i32,
 }
 
 impl Point {
+    /// Create a point.
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 
-    /// Clamp the point so it lies inside `r`.
+    /// Clamp the point so it lies inside `r` (`Point.clamp`).
+    ///
+    /// ```
+    /// use pico_graphics::{Point, Rect};
+    /// let screen = Rect::new(0, 0, 53, 11);
+    /// assert_eq!(Point::new(10, 1000).clamp(screen), Point::new(10, 10));
+    /// ```
     pub fn clamp(self, r: Rect) -> Self {
         Self {
             x: self.x.clamp(r.x, (r.x + r.w - 1).max(r.x)),
@@ -19,6 +30,7 @@ impl Point {
     }
 }
 
+/// Component-wise addition.
 impl core::ops::Add for Point {
     type Output = Point;
     fn add(self, o: Point) -> Point {
@@ -26,6 +38,7 @@ impl core::ops::Add for Point {
     }
 }
 
+/// Component-wise subtraction.
 impl core::ops::Sub for Point {
     type Output = Point;
     fn sub(self, o: Point) -> Point {
@@ -34,31 +47,44 @@ impl core::ops::Sub for Point {
 }
 
 /// An axis-aligned rectangle (`pimoroni::Rect`).
+///
+/// `x`, `y` is the top-left corner; the rectangle covers `x..x + w` and `y..y + h`
+/// (the right and bottom edges are exclusive).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Rect {
+    /// Left edge.
     pub x: i32,
+    /// Top edge.
     pub y: i32,
+    /// Width.
     pub w: i32,
+    /// Height.
     pub h: i32,
 }
 
 impl Rect {
+    /// Create a rectangle from its top-left corner and size.
     pub const fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
         Self { x, y, w, h }
     }
 
+    /// True if the width or height is zero or negative (`Rect.empty`).
     pub fn is_empty(&self) -> bool {
         self.w <= 0 || self.h <= 0
     }
 
+    /// True if `p` is inside; the right and bottom edges are exclusive (`Rect.contains`).
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.x && p.y >= self.y && p.x < self.x + self.w && p.y < self.y + self.h
     }
 
+    /// True if the two rectangles overlap (`Rect.intersects`).
     pub fn intersects(&self, r: Rect) -> bool {
         !(self.x >= r.x + r.w || self.y >= r.y + r.h || self.x + self.w <= r.x || self.y + self.h <= r.y)
     }
 
+    /// The overlapping area, or an empty rectangle if they do not overlap
+    /// (`Rect.intersection`).
     pub fn intersection(&self, r: Rect) -> Rect {
         let x = self.x.max(r.x);
         let y = self.y.max(r.y);
