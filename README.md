@@ -5,15 +5,28 @@ Ported from [pimoroni-pico](https://github.com/pimoroni/pimoroni-pico) (MIT), ke
 
 | Crate                      | What it is                                         |
 | -------------------------- | -------------------------------------------------- |
-| `crates/galactic-unicorn`  | display driver (PIO + looping DMA), buttons, light |
+| `crates/galactic-unicorn`  | display + audio driver (PIO, DMA), buttons, light  |
 | `crates/pico-graphics`     | RGB888 framebuffer, `Rect`, `Point`, `Rgb`         |
-| `src/`                     | demo firmware: rainbow + logging over USB serial   |
+| `crates/pico-synth`        | 8-voice ADSR synthesiser (pure, host-tested)       |
+| `src/`                     | demo firmware: rainbow, buttons, sound, USB log    |
 
 ## Docs
 
 - [Galactic Unicorn driver](docs/galactic-unicorn.md): API, framebuffer layout, what is ported
 - [Pico Graphics](docs/pico-graphics.md): API and C++ mapping
+- [Pico Synth](docs/pico-synth.md): voices, envelopes, waveforms
 - [Driver port plan](docs/driver-port.md): decisions, pipeline, pins
+
+## Demo controls
+
+| Button             | Does                                        |
+| ------------------ | ------------------------------------------- |
+| A (hold)           | sine note, 440 Hz                           |
+| B (hold)           | square note, 660 Hz                         |
+| C                  | plays a 100 ms beep sample                  |
+| D                  | stops all audio                             |
+| BRIGHT+ / BRIGHT−  | brightness (hold to ramp)                   |
+| VOL+ / VOL−        | volume (hold to ramp)                       |
 
 ## Flashing
 
@@ -31,7 +44,7 @@ git submodule update --init   # reference C++ implementation (optional)
 ## Tests
 
 ```sh
-cargo test -p pico-graphics -p galactic-unicorn --target aarch64-apple-darwin
+cargo test -p pico-graphics -p pico-synth -p galactic-unicorn --target aarch64-apple-darwin
 ```
 
 The driver itself (PIO, DMA) only builds for `thumbv8m.main-none-eabihf`, so the host tests cover the pure logic.

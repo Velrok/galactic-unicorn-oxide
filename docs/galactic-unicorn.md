@@ -7,7 +7,7 @@ Mirrors the C++ [README](../ref-impl/libraries/galactic_unicorn/README.md) topic
 - **Gamma + precision:** gamma-corrected, refreshed with 14-bit precision (binary-coded modulation)
 - **Refresh:** the C++ README claims about 300 fps on RP2040; the port runs the same PIO program and has not been measured
 - **Drawing:** via [`pico-graphics`](pico-graphics.md), then `update()`
-- **Not ported:** audio ([why](#audio))
+- **Audio:** an I2S output fed by DMA, with samples or the [synth](pico-synth.md) (see [Audio](#audio))
 
 ## How it fits together
 
@@ -20,6 +20,10 @@ graph LR
     BS -- looping DMA --> PIO[PIO state machine 0]
     PIO --> LED[Column chips + row select]
     Btn[Buttons, light sensor] --> GU
+    Synth[pico-synth] --> GU
+    Smp[Sample buffer] --> GU
+    GU -- DMA + IRQ --> I2S[PIO state machine 1: I2S]
+    I2S --> Amp[Amplifier + speaker]
 ```
 
 Once started, the CPU is not involved in refreshing the display. It only writes the bitstream.
@@ -29,11 +33,12 @@ Once started, the CPU is not involved in refreshing the display. It only writes 
 ```rust
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+    DMA_IRQ_0 => galactic_unicorn::AudioInterruptHandler;
 });
 
 let p = embassy_rp::init(Default::default());
 let pio = Pio::new(p.PIO0, Irqs);
-let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio));
+let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio), Irqs);
 unicorn.set_brightness(0.5);
 
 let mut graphics = PenRgb888::<WIDTH, HEIGHT>::new();
@@ -45,6 +50,7 @@ unicorn.update(&graphics);
 - A complete program is `src/main.rs` (rainbow plus a sweeping dot, logging over USB serial)
 - `GalacticUnicorn::new` replaces C++ `init()`. It is a **singleton**: a second call panics
 - `peripherals!` moves the pins, DMA channels, ADC and PIO into the driver
+- The second argument proves you bound `AudioInterruptHandler` to `DMA_IRQ_0` (see [Audio](#audio))
 - Flash with `./scripts/run.sh` (see [Flashing](../README.md#flashing))
 
 ## Interleaved framebuffer
@@ -87,9 +93,9 @@ You do not need to worry about any of this when using the driver. The layout liv
 | `set_brightness(f32)`      | `set_brightness(f32)`                 | ✅     |
 | `get_brightness()`         | `brightness()`                        | ✅     |
 | `adjust_brightness(f32)`   | `adjust_brightness(f32)`              | ✅     |
-| `set_volume(f32)`          | –                                     | ❌ audio |
-| `get_volume()`             | –                                     | ❌ audio |
-| `adjust_volume(f32)`       | –                                     | ❌ audio |
+| `set_volume(f32)`          | `set_volume(f32)`                     | ✅     |
+| `get_volume()`             | `volume()`                            | ✅     |
+| `adjust_volume(f32)`       | `adjust_volume(f32)`                  | ✅     |
 | `light()`                  | `light()`                             | ✅     |
 | `is_pressed(button)`       | `is_pressed(Button)`                  | ✅     |
 
@@ -141,13 +147,57 @@ info!("We did it! We pressed switch A! Heck yeah!");
 
 ### Audio
 
-❌ **Not ported.** The C++ driver has `play_sample`, `synth_channel`, `play_synth`, `stop_playing` and the volume calls. They need:
+Audio goes out as I2S through a second PIO state machine to the on-board amplifier. It is fed by one DMA channel (`DMA_CH2`) from either a sample buffer or the [synth](pico-synth.md).
 
-- the `audio_i2s.pio` program and a second DMA channel with an IRQ
-- the `pico_synth` library (ADSR voice channels)
-- the MUTE pin (GPIO 22) and I2S pins (9, 10, 11)
+```mermaid
+graph TD
+    Smp["play_sample(&'static [i16])"] --> DMA[audio DMA channel, 16-bit]
+    Syn[pico-synth: 8 voices] --> Buf["2 × 4-sample buffers"]
+    Buf --> DMA
+    DMA -- "DREQ: PIO0 TX1" --> SM1[PIO state machine 1: I2S]
+    SM1 -- "data 9, BCLK 10, LRCLK 11" --> Amp[Amplifier]
+    DMA -- "done: DMA_IRQ_0" --> IRQ[AudioInterruptHandler]
+    IRQ -- "start next buffer, refill the other" --> Buf
+```
 
-Planned for later: [Port order](driver-port.md#port-order) step 5.
+| C++                                   | Rust                                          | Status |
+| ------------------------------------- | --------------------------------------------- | ------ |
+| `play_sample(uint8_t*, length)`       | `play_sample(&'static [i16])`                 | ⚠️ takes samples |
+| `synth_channel(uint)` → reference     | `synth_channel(usize, \|c\| ...)`             | ⚠️ closure |
+| (direct `synth` access)               | `with_synth(\|synth\| ...)`                   | ➕ added |
+| `play_synth()`                        | `play_synth()`                                | ✅     |
+| `stop_playing()`                      | `stop_playing()`                              | ✅     |
+| `set/get/adjust_volume`               | `set_volume`, `volume`, `adjust_volume`       | ✅     |
+
+```rust
+unicorn.synth_channel(0, |c| {
+    c.waveforms = Waveform::SINE;
+    c.frequency = 440;
+    c.attack_ms = 10;
+    c.trigger_attack();
+});
+unicorn.play_synth();
+// later: unicorn.synth_channel(0, |c| c.trigger_release());
+```
+
+- **Samples:** mono, signed 16-bit, **22,050 Hz**. They are played from your buffer by DMA, so the slice must be `'static`. The C++ README says `length` is a number of samples, but the C++ code treats it as bytes (`length / 2` transfers). The port takes a slice of samples, which avoids the confusion
+- **Synth:** `play_synth` starts the stream; keep notes going by triggering envelopes on the channels. Playing stops when `stop_playing` is called or another source replaces it. The sound is generated 4 samples at a time inside the DMA interrupt
+- **Shared synth:** the interrupt and your code both use the synth, so it sits behind a critical section. `synth_channel` and `with_synth` take a closure that runs inside it: keep it short
+- **Volume:** `0.0..=1.0`. It also sets the synth master volume (`volume × 255`). As in C++, the driver starts at 127 (about 0.5), but the synth master starts at `0x2fff` until you call `set_volume`
+- **MUTE:** GPIO 22 is driven high at start, as the C++ does
+
+#### Binding the interrupt
+
+The audio DMA interrupt is `DMA_IRQ_0`. Bind `AudioInterruptHandler` to it and pass the binding to `new`:
+
+```rust
+bind_interrupts!(struct Irqs {
+    DMA_IRQ_0 => galactic_unicorn::AudioInterruptHandler;
+});
+```
+
+- `DMA_IRQ_0` is shared: if you also use embassy's own DMA driver, list its handler in the same `bind_interrupts!` entry
+- The driver owns `DMA_CH0` (bitstream data), `DMA_CH1` (bitstream control) and `DMA_CH2` (audio)
 
 ### Constants
 
@@ -168,6 +218,8 @@ Pin numbers are fixed by the hardware and listed in [driver-port.md](driver-port
 | ------------- | ------------------------------------ | ----------------------------------------- |
 | Setup         | `init()` can be called again         | `new()` once; second call panics          |
 | Teardown      | destructor aborts DMA, frees PIO     | none; the driver lives for the program    |
+| Audio IRQ     | installed by the driver              | you bind `AudioInterruptHandler`          |
+| Shared synth  | plain member                         | behind a critical section (IRQ uses it)   |
 | Peripherals   | claimed by number at runtime         | moved in through `Peripherals`            |
 | Buffer writes | plain stores                         | volatile stores (DMA reads concurrently)  |
 | Buttons       | GPIO number                          | `Button` enum                             |
@@ -178,4 +230,5 @@ Pin numbers are fixed by the hardware and listed in [driver-port.md](driver-port
 
 - `bitstream.rs` is tested on the host: header and ticks, channel-to-bit mapping, brightness, bounds
   - `cargo test -p galactic-unicorn --target aarch64-apple-darwin`
-- The PIO and DMA code can only be checked on the board
+- The synth is tested in [pico-synth](pico-synth.md)
+- The PIO and DMA code (display and audio) can only be checked on the board
