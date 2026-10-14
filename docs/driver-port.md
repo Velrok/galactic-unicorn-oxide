@@ -3,6 +3,7 @@
 - **Board:** RP2350 (Pico 2 W)
 - **Decision:** port the driver, don't use FFI
 - **Source:** [pimoroni-pico](https://github.com/pimoroni/pimoroni-pico) → `libraries/galactic_unicorn` (b41010d)
+- **Status:** display path ported and running on the board; audio not yet. See [galactic-unicorn.md](galactic-unicorn.md) and [pico-graphics.md](pico-graphics.md)
 
 ## Why not FFI
 
@@ -66,11 +67,11 @@ graph TD
 
 ## Port order
 
-1. Fill the buffer with row selects and BCD timing values
-2. Bit-bang driver-chip config `0b1111111111001110` (full current)
-3. Start PIO + looping DMA
-4. `set_pixel`, then `is_pressed` and `light()`
-5. Audio: later
+1. ✅ Fill the buffer with row selects and BCD timing values
+2. ✅ Bit-bang driver-chip config `0b1111111111001110` (full current)
+3. ✅ Start PIO + looping DMA
+4. ✅ `set_pixel`, then `is_pressed` and `light()`
+5. ❌ Audio: later
 
 ## References
 
