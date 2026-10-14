@@ -1,0 +1,18 @@
+[package]
+name = "galactic-unicorn-oxide"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embassy-usb-logger = "0.6.0"
+log = "0.4.34"
+panic-halt = "1.0.0"
+cortex-m-rt = "0.7.7"
+embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread"] }
+embassy-rp = { version = "0.10.0", features = ["rp235xa", "time-driver", "critical-section-impl", "binary-info"] }
+embassy-time = { version = "0.5.1" }
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"
