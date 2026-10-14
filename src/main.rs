@@ -7,7 +7,7 @@ use embassy_rp::peripherals::{PIO0, USB};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::usb::{Driver, InterruptHandler};
 use embassy_time::{Duration, Timer};
-use galactic_unicorn::{GalacticUnicorn, HEIGHT, WIDTH};
+use galactic_unicorn::{Button, GalacticUnicorn, HEIGHT, WIDTH};
 use log::info;
 use panic_halt as _;
 use pico_graphics::{PenRgb888, Point};
@@ -48,10 +48,17 @@ async fn main(spawner: Spawner) {
         }
         graphics.set_pen_rgb(255, 255, 255);
         graphics.set_pixel(Point::new((frame % WIDTH as u32) as i32, HEIGHT as i32 / 2));
+        // Hold the brightness buttons to ramp the brightness (~0.3 per second).
+        if unicorn.is_pressed(Button::BrightnessUp) {
+            unicorn.adjust_brightness(0.01);
+        }
+        if unicorn.is_pressed(Button::BrightnessDown) {
+            unicorn.adjust_brightness(-0.01);
+        }
         unicorn.update(&graphics);
 
         if frame.is_multiple_of(60) {
-            info!("frame {frame}, light {}", unicorn.light());
+            info!("frame {frame}, light {}, brightness {:.2}", unicorn.light(), unicorn.brightness());
         }
         frame = frame.wrapping_add(1);
         Timer::after(Duration::from_millis(33)).await;
