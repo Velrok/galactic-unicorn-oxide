@@ -1,0 +1,17 @@
+[package]
+name = "galactic-unicorn"
+version = "0.1.0"
+edition = "2024"
+description = "Rust port of Pimoroni's Galactic Unicorn (RP2350) display driver"
+license = "MIT"
+
+[dependencies]
+pico-graphics = { path = "../pico-graphics" }
+
+# Hardware driver only builds for the bare-metal target, so the pure
+# bitstream logic stays unit-testable on the host.
+[target.'cfg(target_os = "none")'.dependencies]
+embassy-rp = { version = "0.10.0", features = ["rp235xa", "time-driver", "critical-section-impl", "unstable-pac"] }
+embassy-time = "0.5.1"
+pio = "0.3.0"
+static_cell = "2.1.1"
