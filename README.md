@@ -51,4 +51,6 @@ The driver itself (PIO, DMA) only builds for `thumbv8m.main-none-eabihf`, so the
 
 ## Licence
 
-The port derives from MIT-licensed code by Pimoroni Ltd; see `ref-impl/LICENSE`.
+MIT, see `LICENSE`. The port derives from MIT-licensed code by Pimoroni Ltd, and the I2S PIO program comes from Raspberry Pi (BSD-3-Clause); see `THIRD_PARTY.md`.
+
+This is an unofficial, community port. It is not affiliated with or endorsed by Pimoroni. "Pimoroni" and "Galactic Unicorn" are their trademarks.

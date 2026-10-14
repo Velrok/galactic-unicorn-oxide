@@ -331,6 +331,8 @@ impl<'d> GalacticUnicorn<'d> {
             .write_value(pac::dma::regs::MultiChanTrigger(1 << DMA_CH1::number()));
 
         // Audio: I2S out of a second state machine on the same PIO.
+        // Adapted from audio_i2s.pio, (c) 2020 Raspberry Pi (Trading) Ltd.
+        // SPDX-License-Identifier: BSD-3-Clause (see THIRD_PARTY.md)
         let audio_prg = pio::pio_asm!(
             ".side_set 2",
             //                       /--- LRCLK
