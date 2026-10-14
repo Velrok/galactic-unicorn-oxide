@@ -7,10 +7,13 @@ license = "MIT"
 
 [dependencies]
 pico-graphics = { path = "../pico-graphics" }
+pico-synth = { path = "../pico-synth" }
 
 # Hardware driver only builds for the bare-metal target, so the pure
 # bitstream logic stays unit-testable on the host.
 [target.'cfg(target_os = "none")'.dependencies]
+critical-section = "1.2.0"
+fixed = "1.29.0"
 embassy-rp = { version = "0.10.0", features = ["rp235xa", "time-driver", "critical-section-impl", "unstable-pac"] }
 embassy-time = "0.5.1"
 pio = "0.3.0"

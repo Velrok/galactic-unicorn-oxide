@@ -9,6 +9,9 @@
 //! - `GalacticUnicorn` (bare-metal only) owns the PIO state machine, the DMA, the
 //!   buttons and the light sensor.
 //!
+//! Audio plays through the on-board amplifier: a second PIO state machine sends I2S, fed
+//! by DMA from either a sample buffer or the [`pico_synth`] synthesiser.
+//!
 //! Draw with [`pico_graphics::PenRgb888`] (or any `embedded-graphics` drawing, via its
 //! `DrawTarget` impl), then pass it to [`GalacticUnicorn::update`].
 //!
@@ -23,22 +26,30 @@
 //!
 //! bind_interrupts!(struct Irqs {
 //!     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+//!     DMA_IRQ_0 => galactic_unicorn::AudioInterruptHandler;
 //! });
 //!
 //! let p = embassy_rp::init(Default::default());
 //! let pio = Pio::new(p.PIO0, Irqs);
-//! let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio));
+//! let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio), Irqs);
 //!
 //! let mut graphics = PenRgb888::<WIDTH, HEIGHT>::new();
 //! graphics.set_pen_rgb(255, 255, 0);
 //! graphics.set_pixel(Point::new(10, 5));
 //! unicorn.update(&graphics);
+//!
+//! // A note on synth channel 0.
+//! unicorn.synth_channel(0, |c| {
+//!     c.waveforms = pico_synth::Waveform::SINE;
+//!     c.frequency = 440;
+//!     c.trigger_attack();
+//! });
+//! unicorn.play_synth();
 //! ```
 //!
 //! # Not ported
 //!
-//! Audio (`play_sample`, the synth, volume, the MUTE pin) and the teardown /
-//! re-`init` logic. See `docs/galactic-unicorn.md` in the repository.
+//! The teardown / re-`init` logic. See `docs/galactic-unicorn.md` in the repository.
 //!
 //! Reference: `libraries/galactic_unicorn` (`galactic_unicorn.cpp`, `.hpp`, `.pio`).
 #![cfg_attr(not(test), no_std)]
@@ -46,9 +57,14 @@
 
 pub mod bitstream;
 #[cfg(target_os = "none")]
+mod audio;
+#[cfg(target_os = "none")]
 mod driver;
 
 #[cfg(target_os = "none")]
+pub use audio::AudioInterruptHandler;
+#[cfg(target_os = "none")]
 pub use driver::{Button, GalacticUnicorn, Peripherals};
+pub use pico_synth;
 
 pub use bitstream::{HEIGHT, WIDTH};

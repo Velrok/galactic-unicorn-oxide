@@ -16,17 +16,23 @@ use core::sync::atomic::{AtomicU32, Ordering, compiler_fence};
 
 use embassy_rp::Peri;
 use embassy_rp::adc::{Adc, Channel as AdcChannel, Config as AdcConfig};
+use embassy_rp::clocks::clk_sys_freq;
 use embassy_rp::dma::ChannelInstance;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
+use embassy_rp::interrupt::typelevel::{Binding, DMA_IRQ_0, Interrupt};
 use embassy_rp::pac;
 use embassy_rp::pac::dma::regs::CtrlTrig;
 use embassy_rp::pac::dma::vals::{DataSize, TreqSel};
 use embassy_rp::peripherals::*;
-use embassy_rp::pio::{Common, Config, Direction, FifoJoin, Pio, ShiftConfig, ShiftDirection, StateMachine};
+use embassy_rp::pio::{
+    Common, Config, Direction, FifoJoin, Pin as PioPin, Pio, ShiftConfig, ShiftDirection, StateMachine,
+};
 use embassy_time::{Duration, block_for};
 use pico_graphics::PenRgb888;
+use pico_synth::{AudioChannel, PicoSynth, SAMPLE_RATE};
 use static_cell::StaticCell;
 
+use crate::audio::{self, AUDIO, AudioInterruptHandler, PlayMode};
 use crate::bitstream::{BITSTREAM_LENGTH, Bitstream, HEIGHT, WIDTH};
 
 /// Driver-chip configuration register 1: full output current.
@@ -72,8 +78,18 @@ pub struct Peripherals<'d> {
     pub dma_data: Peri<'d, DMA_CH0>,
     /// DMA channel that reloads `dma_data`'s read address so the stream loops.
     pub dma_ctrl: Peri<'d, DMA_CH1>,
+    /// DMA channel that feeds the I2S audio state machine.
+    pub dma_audio: Peri<'d, DMA_CH2>,
     /// ADC, for the light sensor.
     pub adc: Peri<'d, ADC>,
+    /// I2S data out.
+    pub i2s_data: Peri<'d, PIN_9>,
+    /// I2S bit clock.
+    pub i2s_bclk: Peri<'d, PIN_10>,
+    /// I2S word select (left/right clock).
+    pub i2s_lrclk: Peri<'d, PIN_11>,
+    /// Amplifier mute; driven high, as the C++ does.
+    pub mute: Peri<'d, PIN_22>,
     /// Column driver clock (PIO side-set).
     pub column_clock: Peri<'d, PIN_13>,
     /// Column driver data.
@@ -126,6 +142,11 @@ macro_rules! peripherals {
             pio: $pio,
             dma_data: $p.DMA_CH0,
             dma_ctrl: $p.DMA_CH1,
+            dma_audio: $p.DMA_CH2,
+            i2s_data: $p.PIN_9,
+            i2s_bclk: $p.PIN_10,
+            i2s_lrclk: $p.PIN_11,
+            mute: $p.PIN_22,
             adc: $p.ADC,
             column_clock: $p.PIN_13,
             column_data: $p.PIN_14,
@@ -159,7 +180,12 @@ pub struct GalacticUnicorn<'d> {
     adc: Adc<'d, embassy_rp::adc::Blocking>,
     light: AdcChannel<'d>,
     buttons: [Input<'d>; 9],
-    // Keep the PIO program and state machine alive while DMA feeds them.
+    /// `0..=255`; the C++ default is 127.
+    volume: u16,
+    audio_sm: StateMachine<'d, PIO0, 1>,
+    i2s_pins: [PioPin<'d, PIO0>; 3],
+    _mute: Output<'d>,
+    // Keep the PIO programs and display state machine alive while DMA feeds them.
     _common: Common<'d, PIO0>,
     _sm: StateMachine<'d, PIO0, 0>,
 }
@@ -170,10 +196,13 @@ impl<'d> GalacticUnicorn<'d> {
     /// Display height in pixels (11).
     pub const HEIGHT: usize = HEIGHT;
 
-    /// Configure the driver chips, start the PIO and the looping DMA.
+    /// Configure the driver chips, start the display PIO and its looping DMA, and set up
+    /// the audio output (`init`).
+    ///
+    /// `_irq` proves you bound [`AudioInterruptHandler`] to `DMA_IRQ_0`.
     ///
     /// Panics if called twice (the bitstream is a singleton).
-    pub fn new(mut p: Peripherals<'d>) -> Self {
+    pub fn new(mut p: Peripherals<'d>, _irq: impl Binding<DMA_IRQ_0, AudioInterruptHandler>) -> Self {
         let bitstream = BITSTREAM.init(Bitstream::new());
         BITSTREAM_ADDR.store(bitstream.0.as_ptr() as u32, Ordering::Relaxed);
 
@@ -220,8 +249,10 @@ impl<'d> GalacticUnicorn<'d> {
         }
 
         let Pio {
-            mut common, mut sm0, ..
-        } = p.pio;
+            mut common,
+            mut sm0,
+            mut sm1,
+            ..        } = p.pio;
 
         let prg = pio::pio_asm!(
             ".side_set 1 opt",
@@ -299,6 +330,57 @@ impl<'d> GalacticUnicorn<'d> {
             .multi_chan_trigger()
             .write_value(pac::dma::regs::MultiChanTrigger(1 << DMA_CH1::number()));
 
+        // Audio: I2S out of a second state machine on the same PIO.
+        let audio_prg = pio::pio_asm!(
+            ".side_set 2",
+            //                       /--- LRCLK
+            //                       |/-- BCLK
+            "bitloop1:",
+            "  out pins, 1        side 0b10",
+            "  jmp x--, bitloop1  side 0b11",
+            "  out pins, 1        side 0b00",
+            "  set x, 14          side 0b01",
+            "bitloop0:",
+            "  out pins, 1        side 0b00",
+            "  jmp x--, bitloop0  side 0b01",
+            "  out pins, 1        side 0b10",
+            "public entry_point:",
+            "  set x, 14          side 0b11",
+        );
+        let audio_loaded = common.load_program(&audio_prg.program);
+        let i2s_data = common.make_pio_pin(p.i2s_data);
+        let i2s_bclk = common.make_pio_pin(p.i2s_bclk);
+        let i2s_lrclk = common.make_pio_pin(p.i2s_lrclk);
+
+        let mut audio_cfg = Config::default();
+        audio_cfg.use_program(&audio_loaded, &[&i2s_bclk, &i2s_lrclk]);
+        audio_cfg.set_out_pins(&[&i2s_data]);
+        // I2S is MSB first: shift left. FIFO word: | sample ws=0 | sample ws=1 |
+        audio_cfg.shift_out = ShiftConfig {
+            auto_fill: true,
+            threshold: 32,
+            direction: ShiftDirection::Left,
+        };
+        // 64 PIO cycles per stereo sample; in 24.8 fixed point.
+        audio_cfg.clock_divider = fixed::types::U24F8::from_bits(clk_sys_freq() * 4 / SAMPLE_RATE);
+        sm1.set_config(&audio_cfg);
+        sm1.set_pin_dirs(Direction::Out, &[&i2s_data, &i2s_bclk, &i2s_lrclk]);
+        sm1.set_pins(Level::Low, &[&i2s_data, &i2s_bclk, &i2s_lrclk]);
+        let entry = audio_loaded.origin + audio_prg.public_defines.entry_point as u8;
+        unsafe {
+            sm1.exec_instr(
+                pio::InstructionOperands::JMP {
+                    condition: pio::JmpCondition::Always,
+                    address: entry,
+                }
+                .encode(),
+            )
+        };
+
+        audio::set_dma_channel(DMA_CH2::number());
+        unsafe { DMA_IRQ_0::enable() };
+        let mute = Output::new(p.mute, Level::High);
+
         let adc = Adc::new_blocking(p.adc, AdcConfig::default());
         let light = AdcChannel::new_pin(p.light_sensor, Pull::None);
         let up = Pull::Up;
@@ -320,6 +402,10 @@ impl<'d> GalacticUnicorn<'d> {
             adc,
             light,
             buttons,
+            volume: 127,
+            audio_sm: sm1,
+            i2s_pins: [i2s_data, i2s_bclk, i2s_lrclk],
+            _mute: mute,
             _common: common,
             _sm: sm0,
         }
@@ -380,6 +466,92 @@ impl<'d> GalacticUnicorn<'d> {
     /// True while `button` is held (`is_pressed`).
     pub fn is_pressed(&self, button: Button) -> bool {
         self.buttons[button as usize].is_low()
+    }
+
+    /// Set the volume, clamped to `0.0..=1.0` (`set_volume`).
+    ///
+    /// Also sets the synth's master volume. Note the C++ defaults differ: the driver
+    /// starts at about 0.5 but the synth master starts at `0x2fff` until this is called.
+    pub fn set_volume(&mut self, value: f32) {
+        self.volume = (value.clamp(0.0, 1.0) * 255.0) as u16;
+        let master = self.volume * 255;
+        critical_section::with(|cs| AUDIO.borrow_ref_mut(cs).synth.volume = master);
+    }
+
+    /// Current volume, `0.0..=1.0` (`get_volume`).
+    pub fn volume(&self) -> f32 {
+        self.volume as f32 / 255.0
+    }
+
+    /// Add `delta` to the volume, then clamp to `0.0..=1.0` (`adjust_volume`).
+    pub fn adjust_volume(&mut self, delta: f32) {
+        self.set_volume(self.volume() + delta);
+    }
+
+    /// Play a mono 16-bit PCM sample at 22,050 Hz (`play_sample`), replacing anything
+    /// already playing. Returns immediately; the DMA plays it in the background.
+    ///
+    /// C++ takes a byte pointer and a length in bytes; this takes samples, which must
+    /// be `'static` because the DMA reads them after this call returns.
+    pub fn play_sample(&mut self, data: &'static [i16]) {
+        self.stop_playing();
+        critical_section::with(|cs| {
+            self.audio_sm.set_enable(true);
+            audio::start_transfer(data.as_ptr(), data.len() as u32);
+            AUDIO.borrow_ref_mut(cs).mode = PlayMode::PlayingBuffer;
+        });
+    }
+
+    /// Start the synth playing (`play_synth`). Configure channels with
+    /// [`synth_channel`](Self::synth_channel) / [`with_synth`](Self::with_synth).
+    pub fn play_synth(&mut self) {
+        if critical_section::with(|cs| AUDIO.borrow_ref(cs).mode != PlayMode::PlayingSynth) {
+            self.stop_playing();
+        }
+        critical_section::with(|cs| {
+            let mut audio = AUDIO.borrow_ref_mut(cs);
+            if audio.mode == PlayMode::NotPlaying {
+                // Nothing is playing: the first buffer can be filled straight away.
+                audio.reset_buffers();
+                audio.populate_next_synth();
+                self.audio_sm.set_enable(true);
+                audio.mode = PlayMode::PlayingSynth;
+                drop(audio);
+                audio::next_audio_sequence(cs);
+            }
+        });
+    }
+
+    /// Stop any audio (`stop_playing`).
+    pub fn stop_playing(&mut self) {
+        critical_section::with(|cs| {
+            self.audio_sm.set_enable(false);
+            // Reset the I2S pins to avoid popping when audio is stopped suddenly.
+            let [data, bclk, lrclk] = &self.i2s_pins;
+            self.audio_sm.set_pins(Level::Low, &[data, bclk, lrclk]);
+            audio::dma_safe_abort();
+            AUDIO.borrow_ref_mut(cs).mode = PlayMode::NotPlaying;
+        });
+    }
+
+    /// Run `f` on the synth (`synth`), inside a critical section: keep it short.
+    pub fn with_synth<R>(&mut self, f: impl FnOnce(&mut PicoSynth) -> R) -> R {
+        critical_section::with(|cs| f(&mut AUDIO.borrow_ref_mut(cs).synth))
+    }
+
+    /// Run `f` on synth channel `channel`, `0..8` (`synth_channel`).
+    ///
+    /// ```ignore
+    /// unicorn.synth_channel(0, |c| {
+    ///     c.waveforms = Waveform::SINE;
+    ///     c.frequency = 440;
+    ///     c.trigger_attack();
+    /// });
+    /// unicorn.play_synth();
+    /// ```
+    pub fn synth_channel<R>(&mut self, channel: usize, f: impl FnOnce(&mut AudioChannel) -> R) -> R {
+        assert!(channel < PicoSynth::CHANNEL_COUNT);
+        self.with_synth(|synth| f(&mut synth.channels[channel]))
     }
 }
 
