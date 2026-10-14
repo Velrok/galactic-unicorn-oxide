@@ -1,0 +1,9 @@
+[package]
+name = "pico-graphics"
+version = "0.1.0"
+edition = "2024"
+description = "Rust port of the subset of Pimoroni's pico_graphics needed by the Galactic Unicorn (RGB888 pen)"
+license = "MIT"
+
+[dependencies]
+embedded-graphics-core = "0.4.0"
