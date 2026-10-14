@@ -2,6 +2,6 @@
 target = "thumbv8m.main-none-eabihf"
 
 [target.thumbv8m.main-none-eabihf]
-runner = "picotool load -u -v -x -t elf"
+runner = "picotool load -f -u -v -x -t elf"
 rustflags = ["-C", "link-arg=--nmagic", "-C", "link-arg=-Tlink.x"]
 

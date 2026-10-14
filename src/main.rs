@@ -31,7 +31,7 @@ async fn main(spawner: Spawner) {
 
     let pio = Pio::new(p.PIO0, Irqs);
     let mut unicorn = GalacticUnicorn::new(galactic_unicorn::peripherals!(p, pio));
-    unicorn.set_brightness(0.5);
+    unicorn.set_brightness(0.1);
     info!("galactic unicorn up, {WIDTH}x{HEIGHT}");
 
     let mut graphics = PenRgb888::<WIDTH, HEIGHT>::new();

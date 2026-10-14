@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Flash the board (must be in BOOTSEL mode) and attach to its USB serial log.
+# Flash the board (reboots it into BOOTSEL itself) and attach to its USB serial log.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "Hold BOOTSEL, plug in the board…"
+echo "Flashing…"
 cargo run --release
 
 echo "Waiting for serial port…"

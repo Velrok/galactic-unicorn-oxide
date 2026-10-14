@@ -61,6 +61,16 @@ pub async fn run(driver: Driver<'static, USB>) -> ! {
     let mut config = Config::new(0x2e8a, 0x000a);
     config.manufacturer = Some("galactic-unicorn-oxide");
     config.product = Some("Galactic Unicorn");
+    // picotool matches the running app to the BOOTSEL device by serial number,
+    // which the boot ROM sets to the chip ID.
+    static SERIAL: StaticCell<[u8; 16]> = StaticCell::new();
+    if let Ok(id) = embassy_rp::otp::get_chipid() {
+        let hex = SERIAL.init([0; 16]);
+        for (i, c) in hex.iter_mut().enumerate() {
+            *c = b"0123456789ABCDEF"[(id >> (60 - 4 * i) & 0xf) as usize];
+        }
+        config.serial_number = core::str::from_utf8(hex).ok();
+    }
     config.max_power = 100;
     config.max_packet_size_0 = 64;
 
